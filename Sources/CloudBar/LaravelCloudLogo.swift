@@ -15,7 +15,7 @@ struct LaravelCloudLogo: View {
     }
 
     private static var image: NSImage? {
-        if let url = Bundle.module.url(forResource: "logo", withExtension: "svg"),
+        if let url = CloudBarResources.bundle.url(forResource: "logo", withExtension: "svg"),
            let image = NSImage(contentsOf: url) {
             image.isTemplate = true
             return image

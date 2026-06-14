@@ -3,7 +3,7 @@ import SwiftUI
 
 enum CloudBarAppIcon {
     static var image: NSImage? {
-        if let url = Bundle.module.url(forResource: "AppIcon", withExtension: "png"),
+        if let url = CloudBarResources.bundle.url(forResource: "AppIcon", withExtension: "png"),
            let image = NSImage(contentsOf: url) {
             return image
         }

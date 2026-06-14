@@ -26,7 +26,12 @@ trap 'rm -f "$API_KEY_PATH"' EXIT
 echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$API_KEY_PATH"
 
 echo "Signing $APP_DIR..."
-codesign --force --deep --options runtime \
+codesign --force --options runtime \
+  --entitlements "$ENTITLEMENTS" \
+  --sign "$SIGNING_IDENTITY" \
+  "$APP_DIR/Contents/MacOS/CloudBar"
+
+codesign --force --options runtime \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGNING_IDENTITY" \
   "$APP_DIR"

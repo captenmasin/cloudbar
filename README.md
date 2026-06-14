@@ -6,7 +6,7 @@ A native macOS menu bar app for checking Laravel Cloud usage at a glance.
 
 CloudBar calls the Laravel Cloud API with your bearer token and shows current spend, bandwidth, resource costs, application compute, add-ons, and billing alerts in the menu bar.
 
-<!-- screenshot: menu bar popover -->
+![CloudBar usage popover](docs/screenshot.png)
 
 ## Features
 

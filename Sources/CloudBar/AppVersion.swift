@@ -29,7 +29,7 @@ enum AppVersion {
     }()
 
     private static func parsedBundledInfoPlist() -> (shortVersion: String, build: String)? {
-        guard let url = Bundle.module.url(forResource: "AppInfo", withExtension: "plist"),
+        guard let url = CloudBarResources.bundle.url(forResource: "AppInfo", withExtension: "plist"),
               let data = try? Data(contentsOf: url),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
               let version = plist["CFBundleShortVersionString"] as? String,

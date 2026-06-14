@@ -5,7 +5,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIGURATION="${CONFIGURATION:-debug}"
 APP_DIR="$ROOT_DIR/Build/CloudBar.app"
 EXECUTABLE="$ROOT_DIR/.build/$CONFIGURATION/CloudBar"
-RESOURCE_BUNDLE="$ROOT_DIR/.build/$CONFIGURATION/CloudBar_CloudBar.bundle"
 APP_ICON_SOURCE="$ROOT_DIR/Sources/CloudBar/Resources/AppIcon.png"
 ICONSET_DIR="$ROOT_DIR/Build/AppIcon.iconset"
 ICON_PNG="$ICONSET_DIR/source.png"
@@ -30,7 +29,8 @@ fi
 
 cp "$EXECUTABLE" "$APP_DIR/Contents/MacOS/CloudBar"
 chmod +x "$APP_DIR/Contents/MacOS/CloudBar"
-cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/MacOS/"
+cp "$ROOT_DIR/Sources/CloudBar/Resources/AppIcon.png" "$APP_DIR/Contents/Resources/"
+cp "$ROOT_DIR/Sources/CloudBar/Resources/logo.svg" "$APP_DIR/Contents/Resources/"
 
 mkdir -p "$ICONSET_DIR"
 sips -s format png "$APP_ICON_SOURCE" --out "$ICON_PNG" >/dev/null
