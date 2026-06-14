@@ -9,6 +9,9 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CloudBar",
+            exclude: [
+                "Resources/CloudBar.entitlements",
+            ],
             resources: [
                 .copy("Resources/AppInfo.plist"),
                 .copy("Resources/AppIcon.png"),

@@ -15,7 +15,19 @@ swift build --configuration "$CONFIGURATION"
 
 rm -rf "$APP_DIR" "$ICONSET_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-cp "$ROOT_DIR/Sources/CloudBar/Resources/AppInfo.plist" "$APP_DIR/Contents/Info.plist"
+
+INFO_PLIST_SOURCE="$ROOT_DIR/Sources/CloudBar/Resources/AppInfo.plist"
+INFO_PLIST_DEST="$APP_DIR/Contents/Info.plist"
+cp "$INFO_PLIST_SOURCE" "$INFO_PLIST_DEST"
+
+if [[ -n "${VERSION:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$INFO_PLIST_DEST"
+fi
+
+if [[ -n "${BUILD_NUMBER:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFO_PLIST_DEST"
+fi
+
 cp "$EXECUTABLE" "$APP_DIR/Contents/MacOS/CloudBar"
 chmod +x "$APP_DIR/Contents/MacOS/CloudBar"
 cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/MacOS/"
