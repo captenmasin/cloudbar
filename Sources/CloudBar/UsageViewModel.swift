@@ -3,33 +3,48 @@ import Foundation
 
 @MainActor
 final class UsageViewModel: ObservableObject {
-    @Published var usage: UsageResponse?
+    @Published var usage: UsageResponse? {
+        didSet {
+            syncBillingCurrencyFromUsage()
+        }
+    }
     @Published var errorMessage: String?
     @Published var isLoading = false
     @Published var environment = ""
     @Published var selectedApplicationID = ""
-    @Published private(set) var selectedCurrency = Locale.current.currency?.identifier ?? "USD" {
+    @Published private(set) var displayCurrency: String {
         didSet {
-            currencyFormatter.currencyCode = selectedCurrency
+            currencyFormatter.currencyCode = displayCurrency
+            UserDefaults.standard.set(displayCurrency, forKey: Self.displayCurrencyKey)
         }
     }
+    @Published private(set) var billingCurrency = "USD"
+    @Published private(set) var exchangeRate: Double = 1
+    @Published private(set) var exchangeRateUnavailable = false
     @Published var applications: [CloudApplication] = []
     @Published private(set) var hasToken = false
     @Published private(set) var maskedToken = ""
+    @Published private(set) var lastAPIStatusCode: Int?
     @Published private(set) var isLoadingApplicationCompute = false
     @Published private var applicationComputeItemsByApplicationID: [String: [UsageLineItem]] = [:]
 
     private let client: LaravelCloudClient
+    private let exchangeRateClient: any ExchangeRateProviding
     private let keychain = TokenStore()
     private let currencyFormatter = NumberFormatter()
     private let isoDateFormatter = ISO8601DateFormatter()
     private let displayDateFormatter = DateFormatter()
 
-    init(client: LaravelCloudClient) {
+    init(client: LaravelCloudClient, exchangeRateClient: (any ExchangeRateProviding)? = nil) {
         self.client = client
+        self.exchangeRateClient = exchangeRateClient ?? ExchangeRateClient()
+        let savedDisplayCurrency = UserDefaults.standard.string(forKey: Self.displayCurrencyKey)
+        displayCurrency = savedDisplayCurrency
+            ?? Locale.current.currency?.identifier
+            ?? "USD"
         currencyFormatter.numberStyle = .currency
         currencyFormatter.maximumFractionDigits = 2
-        currencyFormatter.currencyCode = selectedCurrency
+        currencyFormatter.currencyCode = displayCurrency
         displayDateFormatter.dateStyle = .medium
         displayDateFormatter.timeStyle = .short
     }
@@ -44,6 +59,10 @@ final class UsageViewModel: ObservableObject {
 
     var menuBarIcon: String {
         errorMessage == nil ? "cloud.fill" : "exclamationmark.icloud.fill"
+    }
+
+    var hasInvalidToken: Bool {
+        lastAPIStatusCode == 401
     }
 
     var statusText: String {
@@ -196,17 +215,21 @@ final class UsageViewModel: ObservableObject {
             return scopedComputeItems.flatMap(\.flattened)
         }
 
+        if selectedApplicationID.isEmpty {
+            return (usage?.data.applicationTotals?.applications ?? []).flatMap(\.flattened)
+        }
+
         let environmentItems = usage?.data.environmentUsage?.items ?? []
         let applicationItems = usage?.data.applicationTotals?.applications ?? []
         let items = environmentItems.isEmpty ? applicationItems : environmentItems
 
-        guard !selectedApplicationID.isEmpty else {
-            return items.flatMap(\.flattened)
-        }
-
         return items.filter { item in
             item.matchesApplication(id: selectedApplicationID, terms: selectedApplicationSearchTerms)
         }.flatMap(\.flattened)
+    }
+
+    var displayedApplicationComputeTotalCents: Int? {
+        displayedApplicationTotalCents
     }
 
     var clusterGroups: [(UsageClusterType, [UsageLineItem])] {
@@ -334,6 +357,7 @@ final class UsageViewModel: ObservableObject {
             maskedToken = ""
             usage = nil
             errorMessage = nil
+            lastAPIStatusCode = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -352,6 +376,7 @@ final class UsageViewModel: ObservableObject {
 
             isLoading = true
             errorMessage = nil
+            lastAPIStatusCode = nil
             defer { isLoading = false }
 
             let response = try await client.fetchUsage(
@@ -363,9 +388,14 @@ final class UsageViewModel: ObservableObject {
             applicationComputeItemsByApplicationID = [:]
             hasToken = true
             maskedToken = mask(token)
-            if let currency = response.meta.currency, !currency.isEmpty {
-                selectedCurrency = currency
+            syncBillingCurrencyFromUsage()
+            if !UserDefaults.standard.bool(forKey: Self.hasUserSetDisplayCurrencyKey),
+               let currency = response.meta.currency,
+               !currency.isEmpty {
+                displayCurrency = currency
             }
+
+            await refreshExchangeRate()
 
             if !selectedApplicationID.isEmpty && !applicationOptions.contains(where: { $0.id == selectedApplicationID }) {
                 selectedApplicationID = ""
@@ -375,7 +405,16 @@ final class UsageViewModel: ObservableObject {
         } catch {
             usage = nil
             errorMessage = error.localizedDescription
+            lastAPIStatusCode = Self.apiStatusCode(from: error)
         }
+    }
+
+    private static func apiStatusCode(from error: Error) -> Int? {
+        guard case let LaravelCloudError.api(statusCode, _) = error else {
+            return nil
+        }
+
+        return statusCode
     }
 
     func loadSelectedApplicationCompute() async {
@@ -395,9 +434,73 @@ final class UsageViewModel: ObservableObject {
             return "--"
         }
 
-        let amount = Decimal(cents) / 100
+        let convertedCents = convertedCentsToDisplayCurrency(cents)
+        let amount = Decimal(convertedCents) / 100
         return currencyFormatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
     }
+
+    func setDisplayCurrency(_ currencyCode: String) async {
+        let normalized = currencyCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !normalized.isEmpty, normalized != displayCurrency else {
+            return
+        }
+
+        UserDefaults.standard.set(true, forKey: Self.hasUserSetDisplayCurrencyKey)
+        displayCurrency = normalized
+        await refreshExchangeRate()
+    }
+
+    var currencyConversionDescription: String? {
+        guard billingCurrency != displayCurrency else {
+            return nil
+        }
+
+        if exchangeRateUnavailable {
+            return "Could not fetch a live rate from \(billingCurrency) to \(displayCurrency). Showing billing amounts without conversion."
+        }
+
+        return "Converted from \(billingCurrency) at a rate of \(formattedExchangeRate)."
+    }
+
+    private var formattedExchangeRate: String {
+        NumberFormatter.localizedString(from: NSNumber(value: exchangeRate), number: .decimal)
+    }
+
+    func convertedCentsToDisplayCurrency(_ cents: Int) -> Int {
+        guard billingCurrency != displayCurrency else {
+            return cents
+        }
+
+        return Int((Double(cents) * exchangeRate).rounded())
+    }
+
+    func refreshExchangeRate() async {
+        guard billingCurrency != displayCurrency else {
+            exchangeRate = 1
+            exchangeRateUnavailable = false
+            return
+        }
+
+        do {
+            exchangeRate = try await exchangeRateClient.fetchRate(from: billingCurrency, to: displayCurrency)
+            exchangeRateUnavailable = false
+        } catch {
+            exchangeRate = 1
+            exchangeRateUnavailable = true
+        }
+    }
+
+    private func syncBillingCurrencyFromUsage() {
+        guard let currency = usage?.meta.currency?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !currency.isEmpty else {
+            return
+        }
+
+        billingCurrency = currency.uppercased()
+    }
+
+    private static let displayCurrencyKey = "displayCurrency"
+    private static let hasUserSetDisplayCurrencyKey = "hasUserSetDisplayCurrency"
 
     func percent(_ value: Double?) -> String {
         guard let value else {

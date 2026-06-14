@@ -3,38 +3,29 @@ import SwiftUI
 
 @main
 struct CloudBarApp: App {
-    @StateObject private var viewModel = UsageViewModel(client: LaravelCloudClient())
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            UsageMenuView(viewModel: viewModel)
-                .frame(width: 420)
-                .task {
-                    await viewModel.loadSavedToken()
-                    await viewModel.refresh()
-                }
-        } label: {
-            MenuBarLabel(title: viewModel.menuBarTitle)
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
     }
 }
 
-struct MenuBarLabel: View {
-    let title: String
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var viewModel: UsageViewModel!
+    private var menuBarController: MenuBarController!
 
-    var body: some View {
-        Label {
-            Text(title)
-        } icon: {
-            if let icon = NSImage.cloudBarLogo {
-                Image(nsImage: icon)
-                    .resizable()
-                    .renderingMode(.template)
-                    .frame(width: 16, height: 16)
-            } else {
-                Image(systemName: "cloud")
-            }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
+        viewModel = UsageViewModel(client: LaravelCloudClient())
+        menuBarController = MenuBarController(viewModel: viewModel)
+
+        Task {
+            await viewModel.loadSavedToken()
+            await viewModel.refresh()
         }
     }
 }
@@ -87,7 +78,6 @@ extension NSImage {
 
 struct UsageMenuView: View {
     @ObservedObject var viewModel: UsageViewModel
-    @State private var tokenDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -97,7 +87,7 @@ struct UsageMenuView: View {
                 applicationSelector
                 usageContent
             } else {
-                tokenForm
+                signInPrompt
             }
 
             Divider()
@@ -105,9 +95,6 @@ struct UsageMenuView: View {
             controls
         }
         .padding(16)
-        .onAppear {
-            tokenDraft = viewModel.maskedToken
-        }
     }
 
     private var header: some View {
@@ -138,31 +125,7 @@ struct UsageMenuView: View {
     private var usageContent: some View {
         if let usage = viewModel.usage {
             VStack(alignment: .leading, spacing: 12) {
-                MetricRow(
-                    title: "Current spend",
-                    value: viewModel.money(viewModel.displayedCurrentSpendCents),
-                    systemImage: "creditcard"
-                )
-
-                MetricRow(
-                    title: "Bandwidth",
-                    value: viewModel.percent(viewModel.displayedBandwidth?.usagePercentage),
-                    detail: bandwidthDetail(usage),
-                    systemImage: "arrow.up.arrow.down"
-                )
-
-                MetricRow(
-                    title: "Resources",
-                    value: viewModel.money(viewModel.displayedResourcesTotalCents),
-                    systemImage: "server.rack"
-                )
-
-                MetricRow(
-                    title: "Applications",
-                    value: viewModel.money(viewModel.displayedApplicationTotalCents),
-                    detail: viewModel.applicationCountText,
-                    systemImage: "app.connected.to.app.below.fill"
-                )
+                metricsGrid(usage: usage)
 
                 applicationClusters
                 resources(usage)
@@ -190,98 +153,104 @@ struct UsageMenuView: View {
     }
 
     private var applicationSelector: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Application", selection: $viewModel.selectedApplicationID) {
-                Text("All applications").tag("")
-                ForEach(viewModel.applicationOptions) { application in
-                    Text(application.name).tag(application.id)
-                }
+        Picker("Application", selection: $viewModel.selectedApplicationID) {
+            Text("All applications").tag("")
+            ForEach(viewModel.applicationOptions) { application in
+                Text(application.name).tag(application.id)
             }
-            .disabled(viewModel.applicationOptions.isEmpty)
-            .onChange(of: viewModel.selectedApplicationID) { _ in
-                Task { await viewModel.loadSelectedApplicationCompute() }
-            }
-
-            selectedApplicationActions
+        }
+        .disabled(viewModel.applicationOptions.isEmpty)
+        .onChange(of: viewModel.selectedApplicationID) { _, _ in
+            Task { await viewModel.loadSelectedApplicationCompute() }
         }
     }
 
-    private var tokenForm: some View {
+    private var signInPrompt: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Paste a Laravel Cloud API token to begin.")
+            Text("Add your Laravel Cloud API token in Settings to begin.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            SecureField("Bearer token", text: $tokenDraft)
-                .textFieldStyle(.roundedBorder)
-
             Button {
-                Task {
-                    await viewModel.saveToken(tokenDraft)
-                    tokenDraft = viewModel.maskedToken
-                    await viewModel.refresh()
-                }
+                SettingsWindowController.show(viewModel: viewModel, tab: .cloudBar)
             } label: {
-                Label("Save Token", systemImage: "key")
+                Label("Open Settings", systemImage: "gearshape")
             }
-            .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private func metricsGrid(usage: UsageResponse) -> some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), spacing: 8),
+                GridItem(.flexible(), spacing: 8),
+            ],
+            spacing: 8
+        ) {
+            MetricCard(
+                title: "Current spend",
+                value: viewModel.money(viewModel.displayedCurrentSpendCents),
+                systemImage: "creditcard"
+            )
+
+            MetricCard(
+                title: "Bandwidth",
+                value: viewModel.percent(viewModel.displayedBandwidth?.usagePercentage),
+                detail: bandwidthDetail(usage),
+                progress: viewModel.displayedBandwidth?.usagePercentage,
+                systemImage: "arrow.up.arrow.down"
+            )
+
+            MetricCard(
+                title: "Resources",
+                value: viewModel.money(viewModel.displayedResourcesTotalCents),
+                systemImage: "server.rack"
+            )
+
+            MetricCard(
+                title: "Applications",
+                value: viewModel.money(viewModel.displayedApplicationTotalCents),
+                detail: viewModel.applicationCountText,
+                systemImage: "app.connected.to.app.below.fill"
+            )
         }
     }
 
     private var controls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        HStack {
+            if viewModel.hasInvalidToken {
                 Button {
-                    openOrganizationOverview()
+                    SettingsWindowController.show(viewModel: viewModel, tab: .cloudBar)
                 } label: {
-                    Label("Organization", systemImage: "building.2")
+                    Label("Settings", systemImage: "gearshape")
                 }
-
-                Spacer()
-
+            } else {
                 Button {
-                    Task { await viewModel.refresh() }
+                    openOrganizationUsage()
                 } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label("See Organisation", systemImage: "building.2")
                 }
-                .disabled(!viewModel.hasToken || viewModel.isLoading)
             }
-        }
-    }
 
-    @ViewBuilder
-    private var selectedApplicationActions: some View {
-        if viewModel.selectedApplication != nil {
-            HStack {
-                Button {
-                    viewModel.open(viewModel.selectedDeployURL)
-                } label: {
-                    Label("Deploy", systemImage: "paperplane")
-                }
-                .disabled(viewModel.selectedDeployURL == nil)
+            Spacer()
 
-                Button {
-                    viewModel.open(viewModel.selectedVisitURL)
-                } label: {
-                    Label("Visit", systemImage: "safari")
-                }
-                .disabled(viewModel.selectedVisitURL == nil)
-
-                Button {
-                    viewModel.open(viewModel.selectedRepositoryURL)
-                } label: {
-                    Label("View repo", systemImage: "curlybraces.square")
-                }
-                .disabled(viewModel.selectedRepositoryURL == nil)
+            Button {
+                Task { await viewModel.refresh() }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .controlSize(.small)
+            .disabled(!viewModel.hasToken || viewModel.isLoading)
         }
     }
 
     @ViewBuilder
     private var applicationClusters: some View {
         let groups = viewModel.clusterGroups.filter { !$0.1.isEmpty }
-        UsageSection(title: "Application compute", systemImage: "cpu", total: nil) {
+        UsageSection(
+            title: "Application compute",
+            systemImage: "cpu",
+            total: viewModel.money(viewModel.displayedApplicationComputeTotalCents)
+        ) {
             if viewModel.isLoadingApplicationCompute {
                 Text("Loading compute usage...")
                     .font(.caption)
@@ -353,8 +322,8 @@ struct UsageMenuView: View {
         }
     }
 
-    private func openOrganizationOverview() {
-        guard let url = URL(string: "https://cloud.laravel.com") else {
+    private func openOrganizationUsage() {
+        guard let url = URL(string: "https://cloud.laravel.com/to/org/usage") else {
             return
         }
 
@@ -375,33 +344,49 @@ struct UsageMenuView: View {
     }
 }
 
-struct MetricRow: View {
+struct MetricCard: View {
     let title: String
     let value: String
     var detail: String?
+    var progress: Double?
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .frame(width: 22)
-                .foregroundStyle(.tint)
-
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .font(.caption2)
+                    .foregroundStyle(.tint)
                 Text(title)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text(value)
-                    .font(.headline)
-                if let detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                    .lineLimit(1)
             }
 
-            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+
+            if let progress {
+                ProgressView(value: normalizedProgress(progress))
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+            }
+
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
+        .frame(maxWidth: .infinity, minHeight: progress == nil ? 52 : 64, alignment: .topLeading)
+        .padding(8)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func normalizedProgress(_ percentage: Double) -> Double {
+        min(max(percentage / 100, 0), 1)
     }
 }
 
@@ -410,9 +395,15 @@ struct UsageSection<Content: View>: View {
     let systemImage: String
     let total: String?
     @ViewBuilder var content: Content
+    @State private var isExpanded = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                content
+            }
+            .padding(.top, 2)
+        } label: {
             HStack(spacing: 8) {
                 Label(title, systemImage: systemImage)
                     .font(.subheadline.weight(.semibold))
@@ -423,10 +414,8 @@ struct UsageSection<Content: View>: View {
                         .monospacedDigit()
                 }
             }
-
-            content
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 

@@ -98,6 +98,44 @@ import Testing
 }
 
 @MainActor
+@Test func viewModelUsesApplicationTotalsForAllApplicationsCompute() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: orgUsageWithEnvironmentUsageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+
+    #expect(viewModel.displayedApplicationComputeTotalCents == 700)
+    let groups = Dictionary(uniqueKeysWithValues: viewModel.clusterGroups.map { ($0.0, $0.1.map(\.title)) })
+    #expect(groups[.appClusters] == ["web"])
+    #expect(groups[.managedQueues] == ["emails"])
+}
+
+@MainActor
+@Test func moneyConvertsCentsToDisplayCurrency() async throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(
+        client: LaravelCloudClient(),
+        exchangeRateClient: FixedExchangeRateClient(rate: 2)
+    )
+    viewModel.usage = usage
+    await viewModel.setDisplayCurrency("USD")
+
+    #expect(viewModel.convertedCentsToDisplayCurrency(100) == 200)
+    #expect(viewModel.convertedCentsToDisplayCurrency(1234) == 2468)
+}
+
+private struct FixedExchangeRateClient: ExchangeRateProviding, Sendable {
+    let rate: Double
+
+    nonisolated func fetchRate(from source: String, to target: String) async throws -> Double {
+        if source == target {
+            return 1
+        }
+
+        return rate
+    }
+}
+
+@MainActor
 @Test func viewModelUsesCatalogNameForApplicationIDOptions() throws {
     let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageWithApplicationIDTitleFixture)
     let applications = try JSONDecoder.laravelCloud.decode(ApplicationsResponse.self, from: flatApplicationsFixture)
@@ -401,6 +439,70 @@ private let applicationsFixture = Data(
           }
         }
       ]
+    }
+    """.utf8
+)
+
+private let orgUsageWithEnvironmentUsageFixture = Data(
+    """
+    {
+      "data": {
+        "summary": {
+          "current_spend_cents": 1234,
+          "bandwidth": null,
+          "credits": null,
+          "alert": null
+        },
+        "resources": null,
+        "addons": null,
+        "application_totals": {
+          "total_cost_cents": 700,
+          "application_count": 1,
+          "applications": [
+            {
+              "id": "app-1",
+              "name": "sitepulse",
+              "total_cost_cents": 700,
+              "app_clusters": {
+                "total_cost_cents": 500,
+                "items": [
+                  {
+                    "id": "cluster-1",
+                    "name": "web",
+                    "total_cost_cents": 500
+                  }
+                ]
+              },
+              "managed_queues": {
+                "total_cost_cents": 200,
+                "items": [
+                  {
+                    "id": "queue-1",
+                    "name": "emails",
+                    "total_cost_cents": 200
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "environment_usage": {
+          "items": [
+            {
+              "identifier": "inst-1",
+              "type": "app",
+              "total_cents": 999
+            }
+          ],
+          "total_cost_cents": 999
+        }
+      },
+      "meta": {
+        "currency": "GBP",
+        "period": 0,
+        "available_periods": [],
+        "last_updated_at": "2026-06-13T20:30:00Z"
+      }
     }
     """.utf8
 )
