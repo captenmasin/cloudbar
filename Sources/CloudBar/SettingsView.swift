@@ -2,18 +2,21 @@ import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case cloudBar
+    case about
 
     var id: Self { self }
 
     var title: String {
         switch self {
         case .cloudBar: "CloudBar"
+        case .about: "About"
         }
     }
 
     var systemImage: String {
         switch self {
         case .cloudBar: "cloud"
+        case .about: "info.circle"
         }
     }
 }
@@ -117,7 +120,7 @@ private struct SettingsSidebarView: View {
                 Label {
                     Text(tab.title)
                 } icon: {
-                    Image(systemName: tab.systemImage)
+                    SettingsTabIcon(tab: tab)
                 }
                 .foregroundStyle(.primary)
                 .tag(tab)
@@ -131,23 +134,36 @@ private struct SettingsSidebarView: View {
     }
 }
 
-private struct SettingsSidebarFooter: View {
-    private var versionText: String {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
-        return "Version \(version) (\(build))"
-    }
+private struct SettingsTabIcon: View {
+    let tab: SettingsTab
 
     var body: some View {
-        Text(versionText)
-            .font(.footnote)
-            .foregroundStyle(.tertiary)
-            .fontDesign(.monospaced)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 6, trailing: 0))
+        switch tab {
+        case .cloudBar:
+            LaravelCloudLogo(size: 16)
+        case .about:
+            Image(systemName: tab.systemImage)
+        }
+    }
+}
+
+private struct SettingsSidebarFooter: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(AppVersion.displayString)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .fontDesign(.monospaced)
+
+            BuiltByMasonLink()
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 6, trailing: 0))
     }
 }
 
@@ -160,6 +176,8 @@ private struct SettingsDetailView: View {
             switch tab {
             case .cloudBar:
                 AccountSettingsPane(viewModel: viewModel)
+            case .about:
+                AboutSettingsPane()
             }
         }
         .navigationTitle(tab.title)

@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CloudBarAppIcon.applyApplicationIcon()
         NSApp.setActivationPolicy(.accessory)
 
         viewModel = UsageViewModel(client: LaravelCloudClient())

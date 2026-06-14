@@ -83,6 +83,10 @@ struct AccountSettingsPane: View {
             } footer: {
                 Text("Spend amounts are converted from your Laravel Cloud billing currency into the display currency you choose.")
             }
+
+            Section {
+                BuiltByMasonLink()
+            }
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)

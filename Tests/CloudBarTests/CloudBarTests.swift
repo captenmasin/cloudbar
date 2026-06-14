@@ -2,6 +2,12 @@ import Foundation
 import Testing
 @testable import CloudBar
 
+@Test func appVersionReadsBundledInfoPlist() {
+    #expect(AppVersion.shortVersion == "0.1.0")
+    #expect(AppVersion.build == "1")
+    #expect(AppVersion.displayString == "Version 0.1.0 (1)")
+}
+
 @Test func usageDecodesResourcesAndNestedApplicationClusters() throws {
     let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
 

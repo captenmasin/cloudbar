@@ -9,6 +9,11 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CloudBar",
+            resources: [
+                .copy("Resources/AppInfo.plist"),
+                .copy("Resources/AppIcon.png"),
+                .copy("Resources/logo.svg"),
+            ],
             linkerSettings: [
                 .linkedFramework("Security")
             ]
