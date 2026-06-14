@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to release (e.g. v0.1.2)
+        required: true
 
 permissions:
   contents: write
@@ -11,17 +16,30 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Parse version from tag
         id: version
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+            TAG="${TAG#v}"
+          else
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
           echo "version=$TAG" >> "$GITHUB_OUTPUT"
           echo "build_number=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "release_tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Import signing certificate
         env:
@@ -67,7 +85,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            Build/CloudBar.dmg \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          RELEASE_TAG="${{ steps.version.outputs.release_tag }}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" Build/CloudBar.dmg --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              Build/CloudBar.dmg \
+              --title "$RELEASE_TAG" \
+              --generate-notes
+          fi

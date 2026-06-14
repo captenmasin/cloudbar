@@ -22,7 +22,6 @@ if [[ ! -f "$ENTITLEMENTS" ]]; then
 fi
 
 API_KEY_PATH="$(mktemp)"
-trap 'rm -f "$API_KEY_PATH"' EXIT
 echo "$APPLE_API_KEY_BASE64" | base64 --decode > "$API_KEY_PATH"
 
 echo "Signing $APP_DIR..."
@@ -59,12 +58,46 @@ create-dmg \
   "$(dirname "$APP_DIR")" \
   >/dev/null
 
-echo "Notarizing $DMG_PATH..."
-xcrun notarytool submit "$DMG_PATH" \
+echo "Submitting $DMG_PATH for notarization..."
+SUBMISSION_JSON="$(mktemp)"
+trap 'rm -f "$API_KEY_PATH" "$SUBMISSION_JSON"' EXIT
+
+if ! xcrun notarytool submit "$DMG_PATH" \
   --key "$API_KEY_PATH" \
   --key-id "$APPLE_API_KEY_ID" \
   --issuer "$APPLE_API_ISSUER_ID" \
-  --wait
+  --output-format json > "$SUBMISSION_JSON"; then
+  cat "$SUBMISSION_JSON" >&2
+  exit 1
+fi
+
+SUBMISSION_ID="$(python3 -c "import json, sys; print(json.load(open(sys.argv[1]))['id'])" "$SUBMISSION_JSON")"
+echo "Notarization submission ID: $SUBMISSION_ID"
+
+echo "Waiting for Apple notarization..."
+MAX_WAIT_ATTEMPTS=120
+WAIT_SLEEP_SECONDS=30
+for ((attempt = 1; attempt <= MAX_WAIT_ATTEMPTS; attempt++)); do
+  if xcrun notarytool wait "$SUBMISSION_ID" \
+    --key "$API_KEY_PATH" \
+    --key-id "$APPLE_API_KEY_ID" \
+    --issuer "$APPLE_API_ISSUER_ID"; then
+    echo "Notarization accepted."
+    break
+  fi
+
+  if [[ "$attempt" -eq "$MAX_WAIT_ATTEMPTS" ]]; then
+    echo "Notarization did not complete after $MAX_WAIT_ATTEMPTS attempts." >&2
+    xcrun notarytool log "$SUBMISSION_ID" \
+      --key "$API_KEY_PATH" \
+      --key-id "$APPLE_API_KEY_ID" \
+      --issuer "$APPLE_API_ISSUER_ID" >&2 || true
+    exit 1
+  fi
+
+  echo "Notarization wait failed (attempt $attempt/$MAX_WAIT_ATTEMPTS). Retrying in ${WAIT_SLEEP_SECONDS}s..."
+  sleep "$WAIT_SLEEP_SECONDS"
+done
 
 echo "Stapling notarization ticket..."
 xcrun stapler staple "$DMG_PATH"
