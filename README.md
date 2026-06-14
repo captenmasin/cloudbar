@@ -15,13 +15,11 @@ CloudBar calls the Laravel Cloud API with your bearer token and shows current sp
 - **Per-application filtering** — view organization totals or drill into a single application
 - **Currency conversion** — display amounts in your preferred currency using live exchange rates
 - **Secure token storage** — API token saved in the macOS Keychain
-- **Settings window** — manage your token, display currency, and view app info
-- **Agent app** — runs in the menu bar only, with no Dock icon
 
 ## Requirements
 
 - macOS 14 or later
-- Xcode 16+ / Swift 6.3 toolchain (for building from source)
+- Xcode 16+ / Swift 6 toolchain (for building from source)
 
 ## Install
 

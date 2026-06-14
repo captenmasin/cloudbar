@@ -123,7 +123,7 @@ import Testing
         exchangeRateClient: FixedExchangeRateClient(rate: 2)
     )
     viewModel.usage = usage
-    await viewModel.setDisplayCurrency("EUR")
+    await viewModel.setDisplayCurrency("CHF")
 
     #expect(viewModel.convertedCentsToDisplayCurrency(100) == 200)
     #expect(viewModel.convertedCentsToDisplayCurrency(1234) == 2468)
