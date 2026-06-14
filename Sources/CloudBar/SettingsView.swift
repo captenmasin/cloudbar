@@ -129,7 +129,6 @@ private struct SettingsSidebarView: View {
             SettingsSidebarFooter()
         }
         .listStyle(.sidebar)
-        .scrollEdgeEffectStyleSoftIfAvailable()
         .navigationTitle("CloudBar Settings")
     }
 }
@@ -182,16 +181,5 @@ private struct SettingsDetailView: View {
         }
         .navigationTitle(tab.title)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-private extension View {
-    @ViewBuilder
-    func scrollEdgeEffectStyleSoftIfAvailable() -> some View {
-        if #available(macOS 26.0, *) {
-            scrollEdgeEffectStyle(.soft, for: .all)
-        } else {
-            self
-        }
     }
 }
