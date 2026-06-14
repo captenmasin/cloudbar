@@ -1,12 +1,12 @@
 import Foundation
 
-struct LaravelCloudClient {
+struct LaravelCloudClient: Sendable {
     private let apiBaseURL = URL(string: "https://cloud.laravel.com/api")!
-    private let decoder: JSONDecoder
 
-    init() {
-        decoder = JSONDecoder()
+    private func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
     }
 
     func fetchUsage(token: String, environment: String?) async throws -> UsageResponse {
@@ -55,15 +55,15 @@ struct LaravelCloudClient {
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = try? decoder.decode(APIErrorResponse.self, from: data)
+            let message = try? makeDecoder().decode(APIErrorResponse.self, from: data)
             throw LaravelCloudError.api(statusCode: httpResponse.statusCode, message: message?.message)
         }
 
-        return try decoder.decode(T.self, from: data)
+        return try makeDecoder().decode(T.self, from: data)
     }
 }
 
-enum LaravelCloudError: LocalizedError {
+enum LaravelCloudError: LocalizedError, Sendable {
     case invalidURL
     case invalidResponse
     case api(statusCode: Int, message: String?)
@@ -83,24 +83,24 @@ enum LaravelCloudError: LocalizedError {
     }
 }
 
-struct APIErrorResponse: Decodable {
+struct APIErrorResponse: Decodable, Sendable {
     let message: String?
 }
 
-struct UsageResponse: Decodable {
+struct UsageResponse: Decodable, Sendable {
     let data: UsageData
     let meta: UsageMeta
 }
 
-struct ApplicationsResponse: Decodable {
+struct ApplicationsResponse: Decodable, Sendable {
     let data: [CloudApplication]
 }
 
-struct EnvironmentsResponse: Decodable {
+struct EnvironmentsResponse: Decodable, Sendable {
     let data: [CloudEnvironment]
 }
 
-struct CloudEnvironment: Decodable, Identifiable, Hashable {
+struct CloudEnvironment: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let attributes: Attributes
 
@@ -112,13 +112,13 @@ struct CloudEnvironment: Decodable, Identifiable, Hashable {
         attributes.slug
     }
 
-    struct Attributes: Decodable, Hashable {
+    struct Attributes: Decodable, Hashable, Sendable {
         let name: String
         let slug: String?
     }
 }
 
-struct CloudApplication: Decodable, Identifiable, Hashable {
+struct CloudApplication: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let attributes: Attributes
 
@@ -179,13 +179,13 @@ struct CloudApplication: Decodable, Identifiable, Hashable {
         case repo
     }
 
-    struct Attributes: Decodable, Hashable {
+    struct Attributes: Decodable, Hashable, Sendable {
         let name: String
         let slug: String?
         let repository: Repository?
     }
 
-    struct Repository: Decodable, Hashable {
+    struct Repository: Decodable, Hashable, Sendable {
         let fullName: String?
         let url: URL?
 
@@ -218,7 +218,7 @@ struct CloudApplication: Decodable, Identifiable, Hashable {
     }
 }
 
-struct UsageData: Decodable {
+struct UsageData: Decodable, Sendable {
     let summary: UsageSummary
     let resources: ResourceUsage?
     let addons: AddonUsage?
@@ -226,30 +226,30 @@ struct UsageData: Decodable {
     let environmentUsage: TotalOnlyUsage?
 }
 
-struct UsageSummary: Decodable {
+struct UsageSummary: Decodable, Sendable {
     let currentSpendCents: Int?
     let bandwidth: BandwidthUsage?
     let credits: CreditUsage?
     let alert: AlertUsage?
 }
 
-struct BandwidthUsage: Decodable {
+struct BandwidthUsage: Decodable, Sendable {
     let costCents: Int?
     let usagePercentage: Double?
     let allowanceBytes: Int64?
 }
 
-struct CreditUsage: Decodable {
+struct CreditUsage: Decodable, Sendable {
     let usedCents: Int?
     let totalCents: Int?
 }
 
-struct AlertUsage: Decodable {
+struct AlertUsage: Decodable, Sendable {
     let thresholdCents: Int?
     let remainingPercentage: Double?
 }
 
-struct ResourceUsage: Decodable {
+struct ResourceUsage: Decodable, Sendable {
     let totalCostCents: Int?
     let databases: [UsageLineItem]
     let caches: [UsageLineItem]
@@ -274,12 +274,12 @@ struct ResourceUsage: Decodable {
     }
 }
 
-struct AddonUsage: Decodable {
+struct AddonUsage: Decodable, Sendable {
     let totalCostCents: Int?
     let items: [AddonItem]?
 }
 
-struct AddonItem: Decodable, Identifiable {
+struct AddonItem: Decodable, Identifiable, Sendable {
     let id: String
     let name: String
     let totalCents: Int?
@@ -305,7 +305,7 @@ struct AddonItem: Decodable, Identifiable {
     }
 }
 
-struct ApplicationTotals: Decodable {
+struct ApplicationTotals: Decodable, Sendable {
     let totalCostCents: Int?
     let applicationCount: Int?
     let applications: [UsageLineItem]
@@ -324,7 +324,7 @@ struct ApplicationTotals: Decodable {
     }
 }
 
-struct TotalOnlyUsage: Decodable {
+struct TotalOnlyUsage: Decodable, Sendable {
     let totalCostCents: Int?
     let items: [UsageLineItem]
     let managedQueues: ManagedQueueUsage?
@@ -347,7 +347,7 @@ struct TotalOnlyUsage: Decodable {
     }
 }
 
-struct ManagedQueueUsage: Decodable {
+struct ManagedQueueUsage: Decodable, Sendable {
     let totalCostCents: Int?
     let queues: [UsageLineItem]
 
@@ -364,19 +364,19 @@ struct ManagedQueueUsage: Decodable {
     }
 }
 
-struct UsageMeta: Decodable {
+struct UsageMeta: Decodable, Sendable {
     let currency: String?
     let period: Int?
     let availablePeriods: [UsagePeriod]?
     let lastUpdatedAt: String?
 }
 
-struct UsagePeriod: Decodable {
+struct UsagePeriod: Decodable, Sendable {
     let from: String?
     let to: String?
 }
 
-struct UsageLineItem: Decodable, Identifiable, Hashable {
+struct UsageLineItem: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let subtitle: String?
@@ -441,7 +441,7 @@ struct UsageLineItem: Decodable, Identifiable, Hashable {
     }
 }
 
-enum UsageClusterType: String, CaseIterable {
+enum UsageClusterType: String, CaseIterable, Sendable {
     case appClusters
     case workerClusters
     case managedQueues
@@ -490,7 +490,7 @@ private struct DynamicCodingKey: CodingKey {
     }
 }
 
-private enum UsageValue: Decodable, Hashable {
+private enum UsageValue: Decodable, Hashable, Sendable {
     case string(String)
     case int(Int)
     case double(Double)
