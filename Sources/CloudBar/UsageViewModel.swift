@@ -39,6 +39,9 @@ final class UsageViewModel: ObservableObject {
     private let currencyFormatter = NumberFormatter()
     private let isoDateFormatter = ISO8601DateFormatter()
     private let displayDateFormatter = DateFormatter()
+    private var autoRefreshTask: Task<Void, Never>?
+
+    private static let autoRefreshInterval: TimeInterval = 30 * 60
 
     init(client: LaravelCloudClient, exchangeRateClient: (any ExchangeRateProviding)? = nil) {
         self.client = client
@@ -385,6 +388,20 @@ final class UsageViewModel: ObservableObject {
             lastAPIStatusCode = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func startAutoRefresh() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.autoRefreshInterval))
+                guard !Task.isCancelled else {
+                    return
+                }
+
+                await refresh()
+            }
         }
     }
 

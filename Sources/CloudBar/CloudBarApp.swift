@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel = UsageViewModel(client: LaravelCloudClient())
         menuBarController = MenuBarController(viewModel: viewModel)
 
+        viewModel.startAutoRefresh()
+
         Task {
             await viewModel.loadSavedToken()
             await viewModel.refresh()
