@@ -30,6 +30,7 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var hasToken = false
     @Published private(set) var maskedToken = ""
     @Published private(set) var lastAPIStatusCode: Int?
+    @Published private(set) var lastFetchedAt: Date?
     @Published private(set) var isLoadingApplicationCompute = false
     @Published private var applicationComputeItemsByApplicationID: [String: [UsageLineItem]] = [:]
 
@@ -39,7 +40,8 @@ final class UsageViewModel: ObservableObject {
     private let currencyFormatter = NumberFormatter()
     private let isoDateFormatter = ISO8601DateFormatter()
     private let displayDateFormatter = DateFormatter()
-    private var autoRefreshTask: Task<Void, Never>?
+    private var autoRefreshTimer: Timer?
+    private var wakeObserver: NSObjectProtocol?
 
     private static let autoRefreshInterval: TimeInterval = 30 * 60
 
@@ -87,8 +89,12 @@ final class UsageViewModel: ObservableObject {
             return "Refreshing usage..."
         }
 
+        if let lastFetchedAt {
+            return "Fetched \(displayDateFormatter.string(from: lastFetchedAt))"
+        }
+
         if let lastUpdated = formattedUpdatedAt {
-            return "Updated \(lastUpdated)"
+            return "Usage data from \(lastUpdated)"
         }
 
         if errorMessage != nil {
@@ -392,17 +398,41 @@ final class UsageViewModel: ObservableObject {
     }
 
     func startAutoRefresh() {
-        autoRefreshTask?.cancel()
-        autoRefreshTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(Self.autoRefreshInterval))
-                guard !Task.isCancelled else {
-                    return
-                }
-
-                await refresh()
+        autoRefreshTimer?.invalidate()
+        autoRefreshTimer = Timer.scheduledTimer(withTimeInterval: Self.autoRefreshInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                await self?.refreshIfStale()
             }
         }
+        if let autoRefreshTimer {
+            RunLoop.main.add(autoRefreshTimer, forMode: .common)
+        }
+
+        if let wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver)
+        }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.refreshIfStale()
+            }
+        }
+    }
+
+    func refreshIfStale() async {
+        guard hasToken else {
+            return
+        }
+
+        if let lastFetchedAt,
+           Date().timeIntervalSince(lastFetchedAt) < Self.autoRefreshInterval {
+            return
+        }
+
+        await refresh()
     }
 
     func refresh() async {
@@ -443,11 +473,15 @@ final class UsageViewModel: ObservableObject {
                 selectedApplicationID = ""
             }
 
-            await loadSelectedApplicationCompute(token: token)
+            lastFetchedAt = Date()
         } catch {
             usage = nil
             errorMessage = error.localizedDescription
             lastAPIStatusCode = Self.apiStatusCode(from: error)
+        }
+
+        if let token = try? keychain.readToken(), !token.isEmpty {
+            await loadSelectedApplicationCompute(token: token)
         }
     }
 

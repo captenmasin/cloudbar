@@ -75,6 +75,10 @@ final class MenuBarController: NSObject {
 
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
+
+        Task {
+            await viewModel.refreshIfStale()
+        }
     }
 
     private func showContextMenu() {

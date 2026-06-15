@@ -135,9 +135,7 @@ struct UsageMenuView: View {
                 addons(usage)
 
                 if let alertText = viewModel.alertText {
-                    Label(alertText, systemImage: "bell.badge")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    UsageAlertBanner(text: alertText)
                 }
             }
         } else if let errorMessage = viewModel.errorMessage {
@@ -333,6 +331,32 @@ struct UsageMenuView: View {
         NSWorkspace.shared.open(url)
     }
 
+}
+
+struct UsageAlertBanner: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "bell.badge.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .symbolRenderingMode(.hierarchical)
+
+            Text(text)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        }
+    }
 }
 
 struct MetricCard: View {
