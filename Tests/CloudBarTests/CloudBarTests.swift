@@ -83,6 +83,26 @@ import Testing
 }
 
 @MainActor
+@Test func viewModelMenuBarTitleRespectsSpendDisplayToggle() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+
+    viewModel.showSpendInMenuBar = true
+    #expect(viewModel.menuBarTitle == viewModel.money(1234))
+
+    viewModel.showSpendInMenuBar = false
+    #expect(viewModel.menuBarTitle == "")
+
+    viewModel.usage = nil
+    viewModel.showSpendInMenuBar = true
+    #expect(viewModel.menuBarTitle == "Cloud")
+
+    viewModel.showSpendInMenuBar = false
+    #expect(viewModel.menuBarTitle == "")
+}
+
+@MainActor
 @Test func viewModelDoesNotShowUnmatchedOrgResourcesForSelectedApplication() throws {
     let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
     let applications = try JSONDecoder.laravelCloud.decode(ApplicationsResponse.self, from: applicationsFixture)

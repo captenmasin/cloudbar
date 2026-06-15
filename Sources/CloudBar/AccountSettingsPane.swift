@@ -58,6 +58,12 @@ struct AccountSettingsPane: View {
             }
 
             Section {
+                Toggle("Show current spend in menu bar", isOn: $viewModel.showSpendInMenuBar)
+            } header: {
+                Text("Menu Bar")
+            }
+
+            Section {
                 Picker("Display currency", selection: $selectedCurrencyCode) {
                     ForEach(SupportedCurrency.allCases) { currency in
                         Text("\(currency.rawValue) – \(currency.title)")

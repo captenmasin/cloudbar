@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/icon.png" width="128" alt="CloudBar icon">
+  <img src="docs/logo.png" width="480" alt="Cloudbar for Laravel Cloud">
 </p>
-
-<h1 align="center">CloudBar</h1>
 
 <p align="center">
   A native macOS menu bar app for checking Laravel Cloud usage at a glance.

@@ -12,6 +12,11 @@ final class UsageViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var environment = ""
     @Published var selectedApplicationID = ""
+    @Published var showSpendInMenuBar: Bool {
+        didSet {
+            UserDefaults.standard.set(showSpendInMenuBar, forKey: Self.showSpendInMenuBarKey)
+        }
+    }
     @Published private(set) var displayCurrency: String {
         didSet {
             currencyFormatter.currencyCode = displayCurrency
@@ -38,6 +43,11 @@ final class UsageViewModel: ObservableObject {
     init(client: LaravelCloudClient, exchangeRateClient: (any ExchangeRateProviding)? = nil) {
         self.client = client
         self.exchangeRateClient = exchangeRateClient ?? ExchangeRateClient()
+        if UserDefaults.standard.object(forKey: Self.showSpendInMenuBarKey) != nil {
+            showSpendInMenuBar = UserDefaults.standard.bool(forKey: Self.showSpendInMenuBarKey)
+        } else {
+            showSpendInMenuBar = true
+        }
         let savedDisplayCurrency = UserDefaults.standard.string(forKey: Self.displayCurrencyKey)
         displayCurrency = savedDisplayCurrency
             ?? Locale.current.currency?.identifier
@@ -50,6 +60,10 @@ final class UsageViewModel: ObservableObject {
     }
 
     var menuBarTitle: String {
+        guard showSpendInMenuBar else {
+            return ""
+        }
+
         guard usage != nil else {
             return "Cloud"
         }
@@ -510,6 +524,7 @@ final class UsageViewModel: ObservableObject {
         billingCurrency = currency.uppercased()
     }
 
+    private static let showSpendInMenuBarKey = "showSpendInMenuBar"
     private static let displayCurrencyKey = "displayCurrency"
     private static let hasUserSetDisplayCurrencyKey = "hasUserSetDisplayCurrency"
 
