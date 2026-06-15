@@ -197,7 +197,7 @@ struct UsageMenuView: View {
             MetricCard(
                 title: "Bandwidth",
                 value: viewModel.percent(viewModel.displayedBandwidth?.usagePercentage),
-                detail: bandwidthDetail(usage),
+                detail: viewModel.displayedBandwidth == nil ? nil : "of accrued allowance",
                 progress: viewModel.displayedBandwidth?.usagePercentage,
                 systemImage: "arrow.up.arrow.down"
             )
@@ -331,18 +331,6 @@ struct UsageMenuView: View {
         NSWorkspace.shared.open(url)
     }
 
-    private func bandwidthDetail(_ usage: UsageResponse) -> String? {
-        guard let bandwidth = viewModel.displayedBandwidth else {
-            return nil
-        }
-
-        let cost = viewModel.money(bandwidth.costCents)
-        guard let allowance = bandwidth.allowanceBytes else {
-            return cost
-        }
-
-        return "\(cost) of \(ByteCountFormatter.string(fromByteCount: allowance, countStyle: .file))"
-    }
 }
 
 struct MetricCard: View {

@@ -388,6 +388,7 @@ struct UsageLineItem: Decodable, Identifiable, Hashable, Sendable {
     let visitURL: URL?
     let repositoryURL: URL?
     let searchTerms: [String]
+    let isDeleted: Bool
     let children: [UsageLineItem]
 
     init(from decoder: Decoder) throws {
@@ -417,6 +418,7 @@ struct UsageLineItem: Decodable, Identifiable, Hashable, Sendable {
         visitURL = fields.firstURL(for: ["visitURL", "visitUrl", "visit_url", "appURL", "appUrl", "app_url", "applicationURL", "applicationUrl", "application_url", "url", "vanityDomain", "vanity_domain", "domain", "primaryDomain", "primary_domain"])
         repositoryURL = fields.firstURL(for: ["repositoryURL", "repositoryUrl", "repository_url", "repoURL", "repoUrl", "repo_url", "sourceURL", "sourceUrl", "source_url", "repository", "repo"])
         searchTerms = fields.searchTerms
+        isDeleted = fields.firstBool(for: ["deleted"]) ?? false
         children = fields.lineItems(inheriting: clusterType)
     }
 
@@ -586,6 +588,20 @@ private extension Dictionary where Key == String, Value == UsageValue {
         return nil
     }
 
+    func firstBool(for keys: [String]) -> Bool? {
+        for key in keys {
+            if let value = self[key]?.boolValue {
+                return value
+            }
+
+            if let nestedValue = nestedValue(for: key)?.boolValue {
+                return nestedValue
+            }
+        }
+
+        return nil
+    }
+
     func subtitle(excluding title: String) -> String? {
         let values: [String?] = [
             firstString(for: ["type", "plan", "size", "region"]),
@@ -694,6 +710,26 @@ private extension UsageValue {
         case let .object(object):
             return object.firstInt(for: ["totalCostCents", "total_cost_cents", "totalCents", "total_cents", "costCents", "cost_cents"])
         case .bool, .array, .null:
+            return nil
+        }
+    }
+
+    var boolValue: Bool? {
+        switch self {
+        case let .bool(value):
+            return value
+        case let .string(value):
+            switch value.lowercased() {
+            case "true", "yes", "1":
+                return true
+            case "false", "no", "0":
+                return false
+            default:
+                return nil
+            }
+        case let .int(value):
+            return value != 0
+        case .double, .object, .array, .null:
             return nil
         }
     }

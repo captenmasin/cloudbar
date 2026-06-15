@@ -156,6 +156,35 @@ private struct FixedExchangeRateClient: ExchangeRateProviding, Sendable {
     #expect(viewModel.displayedApplicationName == "Ashbound Server")
 }
 
+@MainActor
+@Test func viewModelInfersDeletedApplicationNameFromResources() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageWithDeletedApplicationFixture)
+    let applications = try JSONDecoder.laravelCloud.decode(ApplicationsResponse.self, from: ashboundCatalogFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+    viewModel.applications = applications.data
+
+    let options = Set(viewModel.applicationOptions)
+    #expect(options == [
+        ApplicationOption(id: "app-a1ebe3d4-70a6-4a6e-992a-25f6aa6716e9", name: "sitepulse (deleted)"),
+        ApplicationOption(id: "app-a1ef907f-ea38-4a95-a2a3-e968e769fd49", name: "ashbound-server"),
+    ])
+}
+
+@MainActor
+@Test func viewModelIncludesCatalogApplicationsWithoutUsageTotals() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageWithDeletedApplicationFixture)
+    let applications = try JSONDecoder.laravelCloud.decode(ApplicationsResponse.self, from: fullCatalogFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+    viewModel.applications = applications.data
+
+    let optionIDs = Set(viewModel.applicationOptions.map(\.id))
+    #expect(optionIDs.contains("app-a1ef907f-ea38-4a95-a2a3-e968e769fd49"))
+    #expect(optionIDs.contains("app-a1fb732d-e469-45e4-85e6-bc215fd5a2f8"))
+    #expect(optionIDs.contains("app-a1ebe3d4-70a6-4a6e-992a-25f6aa6716e9"))
+}
+
 private extension JSONDecoder {
     static var laravelCloud: JSONDecoder {
         let decoder = JSONDecoder()
@@ -525,6 +554,113 @@ private let flatApplicationsFixture = Data(
           "repository": "captenmasin/ashbound-server"
         }
       ]
+    }
+    """.utf8
+)
+
+private let ashboundCatalogFixture = Data(
+    """
+    {
+      "data": [
+        {
+          "id": "app-a1ef907f-ea38-4a95-a2a3-e968e769fd49",
+          "type": "applications",
+          "attributes": {
+            "name": "ashbound-server",
+            "slug": "ashbound-server",
+            "repository": {
+              "full_name": "captenmasin/ashbound-server"
+            }
+          }
+        }
+      ]
+    }
+    """.utf8
+)
+
+private let fullCatalogFixture = Data(
+    """
+    {
+      "data": [
+        {
+          "id": "app-a1ef907f-ea38-4a95-a2a3-e968e769fd49",
+          "type": "applications",
+          "attributes": {
+            "name": "ashbound-server",
+            "slug": "ashbound-server"
+          }
+        },
+        {
+          "id": "app-a1fb732d-e469-45e4-85e6-bc215fd5a2f8",
+          "type": "applications",
+          "attributes": {
+            "name": "bookbound",
+            "slug": "bookbound"
+          }
+        }
+      ]
+    }
+    """.utf8
+)
+
+private let usageWithDeletedApplicationFixture = Data(
+    """
+    {
+      "data": {
+        "summary": {
+          "current_spend_cents": 117,
+          "bandwidth": null,
+          "credits": null,
+          "alert": null
+        },
+        "resources": {
+          "total_cost_cents": 0,
+          "databases": [
+            {
+              "name": "sitepulse_dev",
+              "identifier": "royal-mode-62594335",
+              "total_cents": 0,
+              "deleted": false
+            },
+            {
+              "name": "ashbound_server",
+              "identifier": "delicate-mode-60347247",
+              "total_cents": 0,
+              "deleted": false
+            }
+          ],
+          "caches": [],
+          "buckets": [],
+          "websockets": [
+            {
+              "name": "sitepulse",
+              "identifier": "ws-a1ebf7ad-5146-463c-b604-d5c59a9cacfe",
+              "total_cents": 0,
+              "deleted": false
+            }
+          ]
+        },
+        "addons": null,
+        "application_totals": {
+          "total_cost_cents": 117,
+          "application_count": 1,
+          "applications": [
+            {
+              "identifier": "app-a1ebe3d4-70a6-4a6e-992a-25f6aa6716e9",
+              "total_cost_cents": 117,
+              "environment_count": 1,
+              "deleted": true
+            }
+          ]
+        },
+        "environment_usage": null
+      },
+      "meta": {
+        "currency": "USD",
+        "period": 0,
+        "available_periods": [],
+        "last_updated_at": "2026-06-15T09:35:00+00:00"
+      }
     }
     """.utf8
 )

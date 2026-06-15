@@ -1,12 +1,22 @@
-# CloudBar
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="CloudBar icon">
+</p>
 
-[![CI](https://github.com/captenmasin/cloudbar/actions/workflows/ci.yml/badge.svg)](https://github.com/captenmasin/cloudbar/actions/workflows/ci.yml)
+<h1 align="center">CloudBar</h1>
 
-A native macOS menu bar app for checking Laravel Cloud usage at a glance.
+<p align="center">
+  A native macOS menu bar app for checking Laravel Cloud usage at a glance.
+</p>
+
+<p align="center">
+  <a href="https://github.com/captenmasin/cloudbar/actions/workflows/ci.yml"><img src="https://github.com/captenmasin/cloudbar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshot.png" width="480" alt="CloudBar usage popover showing current spend, bandwidth, resources, and billing alerts">
+</p>
 
 CloudBar calls the Laravel Cloud API with your bearer token and shows current spend, bandwidth, resource costs, application compute, add-ons, and billing alerts in the menu bar.
-
-![CloudBar usage popover](docs/screenshot.png)
 
 ## Features
 

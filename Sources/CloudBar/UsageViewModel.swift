@@ -94,15 +94,26 @@ final class UsageViewModel: ObservableObject {
     }
 
     var applicationOptions: [ApplicationOption] {
-        let applications = usage?.data.applicationTotals?.applications ?? []
-        let options = applications.map { item in
-            ApplicationOption(
-                id: item.applicationID ?? item.id,
+        var optionsByID: [String: ApplicationOption] = [:]
+
+        for item in usage?.data.applicationTotals?.applications ?? [] {
+            let id = item.applicationID ?? item.id
+            optionsByID[id] = ApplicationOption(
+                id: id,
                 name: applicationName(for: item)
             )
         }
 
-        return Array(Set(options)).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        for application in applications where optionsByID[application.id] == nil {
+            optionsByID[application.id] = ApplicationOption(
+                id: application.id,
+                name: application.name
+            )
+        }
+
+        return optionsByID.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     var displayedApplicationName: String {
@@ -543,7 +554,65 @@ final class UsageViewModel: ObservableObject {
             return item.title
         }
 
+        if let inferredName = inferredApplicationName(for: item) {
+            return inferredName
+        }
+
+        if item.isDeleted {
+            return "Deleted application"
+        }
+
         return item.applicationID ?? item.id
+    }
+
+    private func inferredApplicationName(for item: UsageLineItem) -> String? {
+        guard item.isDeleted else {
+            return nil
+        }
+
+        let activeCatalogKeys = Set(
+            applications.flatMap { application in
+                [application.name, application.slug].compactMap { $0?.normalizedApplicationKey }
+            }
+        )
+
+        let stemCounts = resourceNameStemCounts()
+        let unclaimedStems = stemCounts.keys.filter { stem in
+            !activeCatalogKeys.contains(where: { catalogKey in
+                stem == catalogKey || stem.hasPrefix(catalogKey) || catalogKey.hasPrefix(stem)
+            })
+        }
+
+        guard let bestStem = unclaimedStems.max(by: { lhs, rhs in
+            let lhsCount = stemCounts[lhs, default: 0]
+            let rhsCount = stemCounts[rhs, default: 0]
+            if lhsCount == rhsCount {
+                return lhs.count > rhs.count
+            }
+
+            return lhsCount < rhsCount
+        }) else {
+            return nil
+        }
+
+        return "\(bestStem) (deleted)"
+    }
+
+    private func resourceNameStemCounts() -> [String: Int] {
+        guard let resources = usage?.data.resources else {
+            return [:]
+        }
+
+        let names = resources.databases.map(\.title)
+            + resources.caches.map(\.title)
+            + resources.buckets.map(\.title)
+            + resources.websockets.map(\.title)
+
+        return names.reduce(into: [:]) { counts, name in
+            for stem in name.applicationNameStems where !stem.isEmpty && !stem.looksLikeApplicationID {
+                counts[stem, default: 0] += 1
+            }
+        }
     }
 
     private func catalogApplication(for item: UsageLineItem) -> CloudApplication? {
@@ -649,6 +718,40 @@ private extension String {
 
     var normalizedApplicationKey: String {
         String(lowercased().filter { $0.isLetter || $0.isNumber })
+    }
+
+    var humanizedSlugName: String {
+        let separators = CharacterSet(charactersIn: "_-.")
+        let parts = lowercased().components(separatedBy: separators).filter { !$0.isEmpty }
+        guard !parts.isEmpty else {
+            return self
+        }
+
+        return parts.map { part in
+            part.prefix(1).uppercased() + part.dropFirst()
+        }.joined(separator: " ")
+    }
+
+    var applicationNameStems: [String] {
+        let normalized = normalizedApplicationKey
+        guard !normalized.isEmpty else {
+            return []
+        }
+
+        var stems: Set<String> = [normalized]
+
+        let parts = lowercased().components(separatedBy: CharacterSet(charactersIn: "_-."))
+            .filter { !$0.isEmpty }
+        if let first = parts.first {
+            stems.insert(String(first.filter { $0.isLetter || $0.isNumber }))
+        }
+
+        let suffixes = ["master", "dev", "prod", "production", "staging", "primary"]
+        for suffix in suffixes where normalized.hasSuffix(suffix) && normalized.count > suffix.count {
+            stems.insert(String(normalized.dropLast(suffix.count)))
+        }
+
+        return Array(stems)
     }
 }
 
