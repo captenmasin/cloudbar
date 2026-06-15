@@ -16,7 +16,7 @@ permissions:
 jobs:
   release:
     runs-on: macos-15
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout
@@ -77,6 +77,7 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          NOTARY_TIMEOUT_MINUTES: 75
         run: |
           brew install create-dmg
           ./scripts/sign-and-notarize.sh
