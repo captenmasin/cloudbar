@@ -32,11 +32,12 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var lastAPIStatusCode: Int?
     @Published private(set) var lastFetchedAt: Date?
     @Published private(set) var isLoadingApplicationCompute = false
-    @Published private var applicationComputeItemsByApplicationID: [String: [UsageLineItem]] = [:]
+    @Published private var applicationComputeCache: [String: ApplicationComputeCacheState] = [:]
 
-    private let client: LaravelCloudClient
+    private let client: any LaravelCloudProviding
     private let exchangeRateClient: any ExchangeRateProviding
-    private let keychain = TokenStore()
+    private let dailySpendStore: DailySpendStore
+    private let keychain: any TokenStoring
     private let currencyFormatter = NumberFormatter()
     private let isoDateFormatter = ISO8601DateFormatter()
     private let displayDateFormatter = DateFormatter()
@@ -45,9 +46,16 @@ final class UsageViewModel: ObservableObject {
 
     private static let autoRefreshInterval: TimeInterval = 30 * 60
 
-    init(client: LaravelCloudClient, exchangeRateClient: (any ExchangeRateProviding)? = nil) {
+    init(
+        client: any LaravelCloudProviding,
+        exchangeRateClient: (any ExchangeRateProviding)? = nil,
+        dailySpendStore: DailySpendStore = DailySpendStore(),
+        keychain: any TokenStoring = TokenStore()
+    ) {
         self.client = client
         self.exchangeRateClient = exchangeRateClient ?? ExchangeRateClient()
+        self.dailySpendStore = dailySpendStore
+        self.keychain = keychain
         if UserDefaults.standard.object(forKey: Self.showSpendInMenuBarKey) != nil {
             showSpendInMenuBar = UserDefaults.standard.bool(forKey: Self.showSpendInMenuBarKey)
         } else {
@@ -244,9 +252,15 @@ final class UsageViewModel: ObservableObject {
     }
 
     var filteredApplicationItems: [UsageLineItem] {
-        if !selectedApplicationID.isEmpty,
-           let scopedComputeItems = applicationComputeItemsByApplicationID[selectedApplicationID] {
-            return scopedComputeItems.flatMap(\.flattened)
+        if !selectedApplicationID.isEmpty {
+            switch applicationComputeCache[selectedApplicationID] {
+            case let .loaded(items) where !items.isEmpty:
+                return items.flatMap(\.flattened)
+            case .loaded:
+                break
+            case .loaded([]), .failed, .notLoaded, nil:
+                break
+            }
         }
 
         if selectedApplicationID.isEmpty {
@@ -342,20 +356,37 @@ final class UsageViewModel: ObservableObject {
         return rawDate
     }
 
-    var alertText: String? {
+    var dailyCostEntries: [DailyCostEntry] {
+        guard let usage else {
+            return []
+        }
+
+        let period = usage.meta.period
+        let periodFrom = usage.meta.availablePeriods?[safe: period ?? 0]?.from
+        let periodKey = DailySpendStore.periodKey(period: period, periodFrom: periodFrom)
+
+        return dailySpendStore.dailyCosts(
+            periodKey: periodKey,
+            scopeKey: selectedApplicationID
+        )
+    }
+
+    var billingAlert: BillingAlertDisplay? {
         guard let alert = usage?.data.summary.alert else {
             return nil
         }
 
-        var parts: [String] = []
-        if let threshold = alert.thresholdCents {
-            parts.append("Alert at \(money(threshold))")
-        }
-        if let remaining = alert.remainingPercentage {
-            parts.append("\(percent(remaining)) remaining")
+        let thresholdText = alert.thresholdCents.map { "Alert at \(money($0))" }
+        let remainingPercentage = alert.remainingPercentage
+
+        guard thresholdText != nil || remainingPercentage != nil else {
+            return nil
         }
 
-        return parts.isEmpty ? nil : parts.joined(separator: " - ")
+        return BillingAlertDisplay(
+            thresholdText: thresholdText,
+            remainingPercentage: remainingPercentage
+        )
     }
 
     func loadSavedToken() async {
@@ -371,6 +402,11 @@ final class UsageViewModel: ObservableObject {
     func saveToken(_ token: String) async {
         let cleaned = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else {
+            return
+        }
+        guard !isMaskedTokenPlaceholder(cleaned),
+              maskedToken.isEmpty || cleaned != maskedToken else {
+            errorMessage = "Enter a new token to save. The saved token cannot be updated from the masked display."
             return
         }
 
@@ -457,7 +493,7 @@ final class UsageViewModel: ObservableObject {
             )
             usage = response
             applications = (try? await client.fetchApplications(token: token)) ?? []
-            applicationComputeItemsByApplicationID = [:]
+            applicationComputeCache = [:]
             hasToken = true
             maskedToken = mask(token)
             syncBillingCurrencyFromUsage()
@@ -474,8 +510,11 @@ final class UsageViewModel: ObservableObject {
             }
 
             lastFetchedAt = Date()
+            recordDailySpendSnapshot()
         } catch {
-            usage = nil
+            if Self.shouldClearUsageOnRefreshError(error) {
+                usage = nil
+            }
             errorMessage = error.localizedDescription
             lastAPIStatusCode = Self.apiStatusCode(from: error)
         }
@@ -491,6 +530,13 @@ final class UsageViewModel: ObservableObject {
         }
 
         return statusCode
+    }
+
+    private static func shouldClearUsageOnRefreshError(_ error: Error) -> Bool {
+        guard case let LaravelCloudError.api(statusCode, _) = error else {
+            return false
+        }
+        return statusCode == 401 || statusCode == 403
     }
 
     func loadSelectedApplicationCompute() async {
@@ -512,7 +558,11 @@ final class UsageViewModel: ObservableObject {
 
         let convertedCents = convertedCentsToDisplayCurrency(cents)
         let amount = Decimal(convertedCents) / 100
-        return currencyFormatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
+        guard let formatter = currencyFormatter.copy() as? NumberFormatter else {
+            return currencyFormatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
+        }
+        formatter.currencyCode = effectiveFormattingCurrency
+        return formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
     }
 
     func setDisplayCurrency(_ currencyCode: String) async {
@@ -546,6 +596,9 @@ final class UsageViewModel: ObservableObject {
         guard billingCurrency != displayCurrency else {
             return cents
         }
+        if exchangeRateUnavailable {
+            return cents
+        }
 
         return Int((Double(cents) * exchangeRate).rounded())
     }
@@ -573,6 +626,23 @@ final class UsageViewModel: ObservableObject {
         }
 
         billingCurrency = currency.uppercased()
+    }
+
+    func isMaskedTokenPlaceholder(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let components = trimmed.components(separatedBy: "...")
+        guard components.count == 2 else {
+            return false
+        }
+
+        return components[0].count == 4 && components[1].count == 4
+    }
+
+    private var effectiveFormattingCurrency: String {
+        if billingCurrency != displayCurrency && exchangeRateUnavailable {
+            return billingCurrency
+        }
+        return displayCurrency
     }
 
     private static let showSpendInMenuBarKey = "showSpendInMenuBar"
@@ -702,9 +772,10 @@ final class UsageViewModel: ObservableObject {
 
     private func loadSelectedApplicationCompute(token: String) async {
         let applicationID = selectedApplicationID
-        guard !applicationID.isEmpty,
-              applicationComputeItemsByApplicationID[applicationID] == nil,
-              !isLoadingApplicationCompute else {
+        guard !applicationID.isEmpty, !isLoadingApplicationCompute else {
+            return
+        }
+        if case .loaded = applicationComputeCache[applicationID] {
             return
         }
 
@@ -720,12 +791,77 @@ final class UsageViewModel: ObservableObject {
                 responses.append(response)
             }
 
-            applicationComputeItemsByApplicationID[applicationID] = responses.flatMap { response in
+            let items = responses.flatMap { response in
                 response.data.environmentUsage?.computeItems ?? []
             }
+            applicationComputeCache[applicationID] = .loaded(items)
         } catch {
-            applicationComputeItemsByApplicationID[applicationID] = []
+            applicationComputeCache[applicationID] = .failed
         }
+
+        recordDailySpendSnapshot()
+    }
+
+    func recordDailySpendSnapshot() {
+        guard let usage,
+              let cumulativeCents = displayedCurrentSpendCents else {
+            return
+        }
+
+        let period = usage.meta.period
+        let periodFrom = usage.meta.availablePeriods?[safe: period ?? 0]?.from
+        let periodKey = DailySpendStore.periodKey(period: period, periodFrom: periodFrom)
+
+        dailySpendStore.record(
+            periodKey: periodKey,
+            scopeKey: selectedApplicationID,
+            cumulativeCents: cumulativeCents,
+            categoryCents: currentCategorySpendCents()
+        )
+        objectWillChange.send()
+    }
+
+    func currentCategorySpendCents() -> [DailyCostCategory: Int] {
+        var totals: [DailyCostCategory: Int] = [:]
+
+        for (clusterType, items) in clusterGroups {
+            let category: DailyCostCategory
+            switch clusterType {
+            case .appClusters:
+                category = .appClusters
+            case .workerClusters:
+                category = .workerClusters
+            case .managedQueues:
+                category = .managedQueues
+            }
+
+            let cents = items.compactMap(\.totalCostCents).reduce(0, +)
+            if cents > 0 {
+                totals[category, default: 0] += cents
+            }
+        }
+
+        func addResource(_ category: DailyCostCategory, items: [UsageLineItem]) {
+            let cents = items.compactMap(\.totalCostCents).reduce(0, +)
+            if cents > 0 {
+                totals[category, default: 0] += cents
+            }
+        }
+
+        addResource(.databases, items: displayedDatabaseItems)
+        addResource(.caches, items: displayedCacheItems)
+        addResource(.buckets, items: displayedBucketItems)
+        addResource(.webSockets, items: displayedWebSocketItems)
+
+        if let addonTotal = displayedAddonsTotalCents, addonTotal > 0 {
+            totals[.addons] = addonTotal
+        }
+
+        if let bandwidthCents = displayedBandwidth?.costCents, bandwidthCents > 0 {
+            totals[.bandwidth] = bandwidthCents
+        }
+
+        return totals
     }
 
     private var selectedApplicationSearchTerms: [String] {
@@ -766,11 +902,40 @@ final class UsageViewModel: ObservableObject {
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         return formatter
     }()
+
+    func setApplicationComputeCacheForTesting(applicationID: String, state: ApplicationComputeCacheState) {
+        applicationComputeCache[applicationID] = state
+    }
+
+    enum ApplicationComputeCacheState {
+        case notLoaded
+        case loaded([UsageLineItem])
+        case failed
+    }
 }
 
 struct ApplicationOption: Identifiable, Hashable {
     let id: String
     let name: String
+}
+
+struct BillingAlertDisplay: Sendable {
+    let thresholdText: String?
+    let remainingPercentage: Double?
+
+    var consumedFraction: Double? {
+        guard let remainingPercentage else {
+            return nil
+        }
+
+        return min(max((100 - remainingPercentage) / 100, 0), 1)
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
 }
 
 private extension String {

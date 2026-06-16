@@ -127,17 +127,25 @@ struct UsageMenuView: View {
     @ViewBuilder
     private var usageContent: some View {
         if let usage = viewModel.usage {
-            VStack(alignment: .leading, spacing: 12) {
-                metricsGrid(usage: usage)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let errorMessage = viewModel.errorMessage {
+                        UsageAlertBanner(text: "Refresh failed: \(errorMessage). Showing last fetched usage.")
+                    }
+                    metricsGrid(usage: usage)
+                    applicationClusters
+                    resources(usage)
+                    addons(usage)
 
-                applicationClusters
-                resources(usage)
-                addons(usage)
-
-                if let alertText = viewModel.alertText {
-                    UsageAlertBanner(text: alertText)
+                    if let billingAlert = viewModel.billingAlert {
+                        BillingAlertProgressView(
+                            alert: billingAlert,
+                            percent: viewModel.percent(_:)
+                        )
+                    }
                 }
             }
+            .frame(maxHeight: 460)
         } else if let errorMessage = viewModel.errorMessage {
             EmptyStateView(
                 title: "Unable to Load Usage",
@@ -162,7 +170,10 @@ struct UsageMenuView: View {
         }
         .disabled(viewModel.applicationOptions.isEmpty)
         .onChange(of: viewModel.selectedApplicationID) { _, _ in
-            Task { await viewModel.loadSelectedApplicationCompute() }
+            Task {
+                await viewModel.loadSelectedApplicationCompute()
+                viewModel.recordDailySpendSnapshot()
+            }
         }
     }
 
@@ -331,6 +342,55 @@ struct UsageMenuView: View {
         NSWorkspace.shared.open(url)
     }
 
+}
+
+struct BillingAlertProgressView: View {
+    let alert: BillingAlertDisplay
+    let percent: (Double?) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "bell.badge.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .symbolRenderingMode(.hierarchical)
+
+                Text("Billing alert")
+                    .font(.caption.weight(.semibold))
+
+                Spacer()
+
+                if let thresholdText = alert.thresholdText {
+                    Text(thresholdText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            if let consumedFraction = alert.consumedFraction {
+                ProgressView(value: consumedFraction)
+                    .progressViewStyle(.linear)
+                    .tint(.orange)
+                    .controlSize(.small)
+            }
+
+            if let remainingPercentage = alert.remainingPercentage {
+                Text("\(percent(remainingPercentage)) remaining")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        }
+    }
 }
 
 struct UsageAlertBanner: View {

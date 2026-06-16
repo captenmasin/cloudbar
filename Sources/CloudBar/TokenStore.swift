@@ -1,7 +1,13 @@
 import Foundation
 import Security
 
-struct TokenStore {
+protocol TokenStoring: Sendable {
+    func readToken() throws -> String?
+    func saveToken(_ token: String) throws
+    func deleteToken() throws
+}
+
+struct TokenStore: TokenStoring {
     private let service = "com.cloudbar.laravel-cloud"
     private let account = "api-token"
 

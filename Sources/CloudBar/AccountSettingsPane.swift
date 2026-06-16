@@ -33,12 +33,12 @@ struct AccountSettingsPane: View {
                             isSaving = true
                             defer { isSaving = false }
                             await viewModel.saveToken(tokenDraft)
-                            tokenDraft = viewModel.maskedToken
+                            tokenDraft = ""
                             await viewModel.refresh()
                         }
                     }
                     .controlSize(.small)
-                    .disabled(tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSaving)
+                    .disabled(!canSaveToken || isSaving)
 
                     Button("Clear Token") {
                         Task {
@@ -98,7 +98,7 @@ struct AccountSettingsPane: View {
         .scrollContentBackground(.hidden)
         .contentMargins(.top, 8, for: .scrollContent)
         .onAppear {
-            tokenDraft = viewModel.maskedToken
+            tokenDraft = ""
             selectedCurrencyCode = viewModel.displayCurrency
         }
         .onChange(of: selectedCurrencyCode) { _, newValue in
@@ -116,5 +116,10 @@ struct AccountSettingsPane: View {
     private var billingCurrencyLabel: String? {
         guard viewModel.usage != nil else { return nil }
         return viewModel.billingCurrency
+    }
+
+    private var canSaveToken: Bool {
+        let trimmed = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && !viewModel.isMaskedTokenPlaceholder(trimmed)
     }
 }

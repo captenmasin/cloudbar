@@ -136,6 +136,119 @@ import Testing
 }
 
 @MainActor
+@Test func dailySpendStoreComputesDailyCostsFromSnapshots() {
+    let defaults = UserDefaults(suiteName: "DailySpendStoreTests")!
+    defaults.removePersistentDomain(forName: "DailySpendStoreTests")
+    let store = DailySpendStore(defaults: defaults)
+    let periodKey = "0:2026-06-01T00:00:00Z"
+    let scopeKey = ""
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+    let dayOne = calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
+    let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11))!
+    let dayThree = calendar.date(from: DateComponents(year: 2026, month: 6, day: 12))!
+
+    store.record(periodKey: periodKey, scopeKey: scopeKey, cumulativeCents: 300, on: dayOne, calendar: calendar)
+    store.record(periodKey: periodKey, scopeKey: scopeKey, cumulativeCents: 550, on: dayTwo, calendar: calendar)
+    store.record(periodKey: periodKey, scopeKey: scopeKey, cumulativeCents: 700, on: dayThree, calendar: calendar)
+
+    let costs = store.dailyCosts(periodKey: periodKey, scopeKey: scopeKey, calendar: calendar)
+    #expect(costs.map(\.costCents) == [300, 250, 150])
+    #expect(costs.allSatisfy { !$0.hasSegmentedBreakdown })
+}
+
+@Test func dailySpendStoreComputesSegmentedDailyCostsFromSnapshots() {
+    let defaults = UserDefaults(suiteName: "DailySpendStoreSegmentTests")!
+    defaults.removePersistentDomain(forName: "DailySpendStoreSegmentTests")
+    let store = DailySpendStore(defaults: defaults)
+    let periodKey = "0:2026-06-01T00:00:00Z"
+    let scopeKey = ""
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+    let dayOne = calendar.date(from: DateComponents(year: 2026, month: 6, day: 10))!
+    let dayTwo = calendar.date(from: DateComponents(year: 2026, month: 6, day: 11))!
+
+    store.record(
+        periodKey: periodKey,
+        scopeKey: scopeKey,
+        cumulativeCents: 500,
+        categoryCents: [.appClusters: 300, .databases: 200],
+        on: dayOne,
+        calendar: calendar
+    )
+    store.record(
+        periodKey: periodKey,
+        scopeKey: scopeKey,
+        cumulativeCents: 900,
+        categoryCents: [.appClusters: 500, .databases: 400],
+        on: dayTwo,
+        calendar: calendar
+    )
+
+    let costs = store.dailyCosts(periodKey: periodKey, scopeKey: scopeKey, calendar: calendar)
+    #expect(costs.map(\.costCents) == [500, 400])
+    #expect(costs[0].segments.map(\.category) == [.appClusters, .databases])
+    #expect(costs[0].segments.map(\.costCents) == [300, 200])
+    #expect(costs[1].segments.map(\.category) == [.appClusters, .databases])
+    #expect(costs[1].segments.map(\.costCents) == [200, 200])
+}
+
+@MainActor
+@Test func viewModelExposesDailyCostEntriesForCurrentScope() throws {
+    let defaults = UserDefaults(suiteName: "DailySpendViewModelTests")!
+    defaults.removePersistentDomain(forName: "DailySpendViewModelTests")
+    let store = DailySpendStore(defaults: defaults)
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient(), dailySpendStore: store)
+    viewModel.usage = usage
+    viewModel.recordDailySpendSnapshot()
+
+    #expect(viewModel.dailyCostEntries.count == 1)
+    #expect(viewModel.dailyCostEntries.first?.costCents == 1234)
+    #expect(viewModel.dailyCostEntries.first?.hasSegmentedBreakdown == true)
+}
+
+@MainActor
+@Test func viewModelExposesBillingAlertProgressData() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+
+    #expect(viewModel.billingAlert == nil)
+
+    let alertUsage = Data(
+        """
+        {
+          "data": {
+            "summary": {
+              "current_spend_cents": 8000,
+              "alert": {
+                "threshold_cents": 10000,
+                "remaining_percentage": 20
+              }
+            }
+          },
+          "meta": {
+            "currency": "GBP",
+            "period": 0
+          }
+        }
+        """
+        .utf8
+    )
+
+    let alertResponse = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: alertUsage)
+    viewModel.usage = alertResponse
+
+    let billingAlert = try #require(viewModel.billingAlert)
+    #expect(billingAlert.thresholdText?.contains("100.00") == true)
+    #expect(billingAlert.remainingPercentage == 20)
+    #expect(billingAlert.consumedFraction == 0.8)
+}
+
+@MainActor
 @Test func moneyConvertsCentsToDisplayCurrency() async throws {
     let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
     let viewModel = UsageViewModel(
@@ -150,6 +263,156 @@ import Testing
     #expect(viewModel.convertedCentsToDisplayCurrency(1234) == 2468)
 }
 
+@Test func laravelCloudClientFetchUsageDecodesSuccessResponse() async throws {
+    let token = "test-token"
+    let session = URLSession.mocked(
+        statusCode: 200,
+        body: usageFixture,
+        url: URL(string: "https://cloud.laravel.com/api/usage")!
+    )
+    let client = LaravelCloudClient(session: session)
+
+    let usage = try await client.fetchUsage(token: token, environment: nil)
+    #expect(usage.data.summary.currentSpendCents == 1234)
+}
+
+@Test func laravelCloudClientFetchUsageThrowsAPIErrorOnUnauthorized() async throws {
+    let session = URLSession.mocked(
+        statusCode: 401,
+        body: Data(#"{"message":"Unauthorized"}"#.utf8),
+        url: URL(string: "https://cloud.laravel.com/api/usage?environment=env-401")!
+    )
+    let client = LaravelCloudClient(session: session)
+
+    await #expect(throws: LaravelCloudError.self) {
+        _ = try await client.fetchUsage(token: "test-token", environment: "env-401")
+    }
+}
+
+@Test func laravelCloudClientFetchUsageThrowsDecodingErrorOnInvalidJSON() async throws {
+    let session = URLSession.mocked(
+        statusCode: 200,
+        body: Data("not json".utf8),
+        url: URL(string: "https://cloud.laravel.com/api/usage?environment=env-json")!
+    )
+    let client = LaravelCloudClient(session: session)
+
+    await #expect(throws: DecodingError.self) {
+        _ = try await client.fetchUsage(token: "test-token", environment: "env-json")
+    }
+}
+
+@MainActor
+@Test func refreshSuccessSetsUsageAndHasToken() async throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let tokenStore = FakeTokenStore(token: "real-token")
+    let client = MockLaravelCloudClient()
+    client.usageResult = .success(usage)
+    client.applicationsResult = .success([])
+    let viewModel = UsageViewModel(client: client, keychain: tokenStore)
+
+    await viewModel.refresh()
+
+    #expect(viewModel.usage != nil)
+    #expect(viewModel.errorMessage == nil)
+    #expect(viewModel.hasToken == true)
+}
+
+@MainActor
+@Test func refresh401ClearsUsageAndTracksStatusCode() async throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let tokenStore = FakeTokenStore(token: "real-token")
+    let client = MockLaravelCloudClient()
+    client.usageResult = .failure(LaravelCloudError.api(statusCode: 401, message: "Unauthorized"))
+    let viewModel = UsageViewModel(client: client, keychain: tokenStore)
+    viewModel.usage = usage
+
+    await viewModel.refresh()
+
+    #expect(viewModel.usage == nil)
+    #expect(viewModel.lastAPIStatusCode == 401)
+    #expect(viewModel.errorMessage != nil)
+}
+
+@MainActor
+@Test func refreshTransientErrorRetainsPreviousUsage() async throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let tokenStore = FakeTokenStore(token: "real-token")
+    let client = MockLaravelCloudClient()
+    client.usageResult = .failure(URLError(.timedOut))
+    let viewModel = UsageViewModel(client: client, keychain: tokenStore)
+    viewModel.usage = usage
+
+    await viewModel.refresh()
+
+    #expect(viewModel.usage != nil)
+    #expect(viewModel.errorMessage != nil)
+}
+
+@MainActor
+@Test func saveTokenRejectsMaskedPlaceholder() async throws {
+    let tokenStore = FakeTokenStore()
+    let viewModel = UsageViewModel(client: MockLaravelCloudClient(), keychain: tokenStore)
+    await viewModel.saveToken("abcd...wxyz")
+
+    #expect(viewModel.hasToken == false)
+    #expect(tokenStore.storedToken == nil)
+    #expect(viewModel.errorMessage != nil)
+}
+
+@MainActor
+@Test func saveTokenRejectsMaskedValueAfterRealTokenWasSaved() async throws {
+    let tokenStore = FakeTokenStore()
+    let viewModel = UsageViewModel(client: MockLaravelCloudClient(), keychain: tokenStore)
+    await viewModel.saveToken("realtokenvalue1234")
+    let originalToken = tokenStore.storedToken
+    await viewModel.saveToken(viewModel.maskedToken)
+
+    #expect(tokenStore.storedToken == originalToken)
+    #expect(viewModel.errorMessage != nil)
+}
+
+@MainActor
+@Test func moneyUsesBillingCurrencyWhenExchangeRateUnavailable() async throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(
+        client: MockLaravelCloudClient(),
+        exchangeRateClient: FailingExchangeRateClient()
+    )
+    viewModel.usage = usage
+    await viewModel.setDisplayCurrency("USD")
+    await viewModel.setDisplayCurrency("CHF")
+
+    #expect(viewModel.exchangeRateUnavailable == true)
+    #expect(viewModel.convertedCentsToDisplayCurrency(1234) == 1234)
+}
+
+@MainActor
+@Test func viewModelFallsBackToOrgTotalsWhenComputeCacheFailed() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+    viewModel.selectedApplicationID = "app-1"
+    viewModel.setApplicationComputeCacheForTesting(applicationID: "app-1", state: .failed)
+
+    let groups = Dictionary(uniqueKeysWithValues: viewModel.clusterGroups.map { ($0.0, $0.1.map(\.title)) })
+    #expect(groups[.appClusters] == ["web"])
+    #expect(groups[.managedQueues] == ["emails"])
+}
+
+@MainActor
+@Test func viewModelFallsBackToOrgTotalsWhenComputeCacheLoadedEmpty() throws {
+    let usage = try JSONDecoder.laravelCloud.decode(UsageResponse.self, from: usageFixture)
+    let viewModel = UsageViewModel(client: LaravelCloudClient())
+    viewModel.usage = usage
+    viewModel.selectedApplicationID = "app-1"
+    viewModel.setApplicationComputeCacheForTesting(applicationID: "app-1", state: .loaded([]))
+
+    let groups = Dictionary(uniqueKeysWithValues: viewModel.clusterGroups.map { ($0.0, $0.1.map(\.title)) })
+    #expect(groups[.appClusters] == ["web"])
+    #expect(groups[.managedQueues] == ["emails"])
+}
+
 private struct FixedExchangeRateClient: ExchangeRateProviding, Sendable {
     let rate: Double
 
@@ -159,6 +422,89 @@ private struct FixedExchangeRateClient: ExchangeRateProviding, Sendable {
         }
 
         return rate
+    }
+}
+
+private struct FailingExchangeRateClient: ExchangeRateProviding, Sendable {
+    nonisolated func fetchRate(from source: String, to target: String) async throws -> Double {
+        throw URLError(.cannotConnectToHost)
+    }
+}
+
+final class FakeTokenStore: TokenStoring, @unchecked Sendable {
+    var storedToken: String?
+
+    init(token: String? = nil) {
+        storedToken = token
+    }
+
+    func readToken() throws -> String? { storedToken }
+    func saveToken(_ token: String) throws { storedToken = token }
+    func deleteToken() throws { storedToken = nil }
+}
+
+final class MockLaravelCloudClient: LaravelCloudProviding, @unchecked Sendable {
+    var usageResult: Result<UsageResponse, Error> = .failure(URLError(.badServerResponse))
+    var applicationsResult: Result<[CloudApplication], Error> = .success([])
+    var environmentsResult: Result<[CloudEnvironment], Error> = .success([])
+
+    func fetchUsage(token: String, environment: String?) async throws -> UsageResponse {
+        try usageResult.get()
+    }
+
+    func fetchApplications(token: String) async throws -> [CloudApplication] {
+        try applicationsResult.get()
+    }
+
+    func fetchEnvironments(token: String, applicationID: String) async throws -> [CloudEnvironment] {
+        try environmentsResult.get()
+    }
+}
+
+private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var responseByURL: [String: (Int, Data)] = [:]
+    static let responseLock = NSLock()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let requestURL = request.url?.absoluteString else {
+            client?.urlProtocol(self, didFailWithError: URLError(.unknown))
+            return
+        }
+
+        Self.responseLock.lock()
+        let registeredResponse = Self.responseByURL[requestURL]
+        Self.responseLock.unlock()
+
+        guard let registeredResponse else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: registeredResponse.0,
+            httpVersion: nil,
+            headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: registeredResponse.1)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private extension URLSession {
+    static func mocked(statusCode: Int, body: Data, url: URL) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        MockURLProtocol.responseLock.lock()
+        MockURLProtocol.responseByURL[url.absoluteString] = (statusCode, body)
+        MockURLProtocol.responseLock.unlock()
+        return URLSession(configuration: configuration)
     }
 }
 

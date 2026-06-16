@@ -1,7 +1,18 @@
 import Foundation
 
-struct LaravelCloudClient: Sendable {
+protocol LaravelCloudProviding: Sendable {
+    func fetchUsage(token: String, environment: String?) async throws -> UsageResponse
+    func fetchApplications(token: String) async throws -> [CloudApplication]
+    func fetchEnvironments(token: String, applicationID: String) async throws -> [CloudEnvironment]
+}
+
+struct LaravelCloudClient: LaravelCloudProviding, Sendable {
     private let apiBaseURL = URL(string: "https://cloud.laravel.com/api")!
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
 
     private func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
@@ -50,7 +61,7 @@ struct LaravelCloudClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 30
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw LaravelCloudError.invalidResponse
         }
