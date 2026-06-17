@@ -8,7 +8,7 @@ protocol TokenStoring: Sendable {
 }
 
 struct TokenStore: TokenStoring {
-    private let service = "com.cloudbar.laravel-cloud"
+    private let service = "com.captenmasin.cloudbar"
     private let account = "api-token"
 
     func readToken() throws -> String? {
